@@ -142,7 +142,17 @@ pnpm install
    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
    CLERK_SECRET_KEY=sk_test_...
    ```
-3. Open the **Convex integration** page in the Clerk dashboard (dashboard.clerk.com/apps/setup/convex) and activate it. This creates the `convex` JWT template and shows your **Frontend API URL** (looks like `https://your-app-12.clerk.accounts.dev`). You need it in step 3.
+3. Open the **Convex integration** page in the Clerk dashboard (dashboard.clerk.com/apps/setup/convex) and activate it. This adds the `aud: "convex"` claim to Clerk's session token and shows your **Frontend API URL** (looks like `https://your-app-12.clerk.accounts.dev`). You need it in step 3.
+4. **Configure > Sessions > Customize session token**: add the profile claims, so Convex receives a name and an email:
+   ```json
+   {
+     "aud": "convex",
+     "email": "{{user.primary_email_address}}",
+     "name": "{{user.full_name}}",
+     "given_name": "{{user.first_name}}"
+   }
+   ```
+   The integration alone only adds `aud`. Without these claims every user arrives as "Neighbour" with no email, and notifications for them fail into the error workflow (which is at least the right failure, but not the one you want).
 
 ### 3. Convex
 
@@ -274,7 +284,7 @@ Two roles, stored on the Convex `users` row:
 4. **State transitions are guarded too.** You cannot approve a declined request, approve while the tool is out, or borrow your own tool. Each check throws a typed `ConvexError` (`UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `INVALID`, `CONFLICT`) that the UI shows as a message.
 5. **Read paths follow the same rules.** "My requests" and "Incoming" only query by the caller's own id through an index, so there is no filter to get wrong. Other users' emails are never returned to non-admins.
 
-`proxy.ts` (Next 16's renamed middleware) redirects signed-out visitors away from app routes. It is an optimistic check that saves an empty page load, not authorization.
+`proxy.ts` (Next 16's renamed middleware) redirects signed-out visitors away from app routes. It is an optimistic check that saves an empty page load, not authorization. Clerk now marks path matching (`createRouteMatcher`) as deprecated for exactly this reason: paths can diverge from how Next.js routes requests. That warning does not touch LendLoop's security, because no data is reachable without a Convex function that checks the caller itself.
 
 ---
 
