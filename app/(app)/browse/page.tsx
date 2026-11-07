@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useAppQuery } from "@/components/AppReady";
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -11,8 +12,8 @@ import { errorMessage, localToday } from "@/lib/format";
 
 export default function BrowsePage() {
   const [category, setCategory] = useState<Category | undefined>();
-  const tools = useQuery(api.tools.browse, { category });
-  const [requesting, setRequesting] = useState<{ id: Id<"tools">; name: string } | null>(null);
+  const tools = useAppQuery(api.tools.browse, { category });
+  const [requesting, setRequesting] = useState<RequestTarget | null>(null);
 
   return (
     <>
@@ -49,7 +50,11 @@ export default function BrowsePage() {
                   (tool.myPendingRequest ? (
                     <span className="text-xs text-stone-500">Request sent</span>
                   ) : (
-                    <Button variant="secondary" onClick={() => setRequesting({ id: tool._id, name: tool.name })}>
+                    <Button
+                      variant="secondary"
+                      // Read the date in the click handler, not during render.
+                      onClick={() => setRequesting({ id: tool._id, name: tool.name, today: localToday() })}
+                    >
                       Request
                     </Button>
                   ))}
@@ -58,20 +63,16 @@ export default function BrowsePage() {
           ))}
         </div>
       )}
-      <RequestDialog tool={requesting} onClose={() => setRequesting(null)} />
+      <RequestDialog key={requesting?.id ?? "closed"} tool={requesting} onClose={() => setRequesting(null)} />
     </>
   );
 }
 
-function RequestDialog({
-  tool,
-  onClose,
-}: {
-  tool: { id: Id<"tools">; name: string } | null;
-  onClose: () => void;
-}) {
+type RequestTarget = { id: Id<"tools">; name: string; today: string };
+
+function RequestDialog({ tool, onClose }: { tool: RequestTarget | null; onClose: () => void }) {
   const request = useMutation(api.loans.request);
-  const today = localToday();
+  const today = tool?.today ?? "";
   const [startDate, setStart] = useState(today);
   const [endDate, setEnd] = useState(today);
   const [note, setNote] = useState("");

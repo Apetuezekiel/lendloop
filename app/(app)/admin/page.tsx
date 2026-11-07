@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useAppQuery } from "@/components/AppReady";
 import { api } from "@/convex/_generated/api";
 import { CATEGORY_LABELS } from "@/convex/lib/constants";
 import { ActivityList, LoanStatusBadge, TrustedBadge } from "@/components/domain";
@@ -12,7 +13,7 @@ import type { ReactNode } from "react";
 // here is an adminQuery and throws FORBIDDEN for anyone else.
 
 export default function AdminPage() {
-  const me = useQuery(api.users.me);
+  const me = useAppQuery(api.users.me, {});
   if (me === undefined) return <Loading />;
   if (me?.role !== "admin") return <EmptyState title="Admins only">You do not have access to this page.</EmptyState>;
   return (
@@ -42,7 +43,7 @@ const th = "px-4 py-2 font-medium text-stone-500";
 const td = "px-4 py-3 align-top";
 
 function Automation() {
-  const data = useQuery(api.automation.overview);
+  const data = useAppQuery(api.automation.overview, {});
   const retry = useMutation(api.automation.retryEvent);
   if (!data) return <Loading />;
   const failed = data.events.filter((e) => e.status === "failed");
@@ -107,7 +108,7 @@ function Automation() {
 }
 
 function Loans() {
-  const loans = useQuery(api.loans.listForAdmin);
+  const loans = useAppQuery(api.loans.listForAdmin, {});
   if (!loans) return <Loading />;
   return (
     <Section title={`All loans (${loans.length})`}>
@@ -138,7 +139,7 @@ function Loans() {
 }
 
 function Listings() {
-  const tools = useQuery(api.tools.listForAdmin);
+  const tools = useAppQuery(api.tools.listForAdmin, {});
   const remove = useMutation(api.tools.remove);
   if (!tools) return <Loading />;
   return (
@@ -185,7 +186,7 @@ function Listings() {
 }
 
 function Members() {
-  const users = useQuery(api.users.listForAdmin);
+  const users = useAppQuery(api.users.listForAdmin, {});
   const setTrusted = useMutation(api.users.setTrustedLender);
   if (!users) return <Loading />;
   return (

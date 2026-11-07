@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useAppQuery } from "@/components/AppReady";
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
@@ -19,7 +20,7 @@ import { errorMessage } from "@/lib/format";
 type Listing = Pick<Doc<"tools">, "_id" | "name" | "category" | "condition" | "description">;
 
 export default function ListingsPage() {
-  const tools = useQuery(api.tools.mine);
+  const tools = useAppQuery(api.tools.mine, {});
   const remove = useMutation(api.tools.remove);
   const [editing, setEditing] = useState<Listing | "new" | null>(null);
 

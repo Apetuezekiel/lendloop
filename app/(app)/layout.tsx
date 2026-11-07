@@ -7,7 +7,7 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/convex/_generated/api";
 import { Logo } from "@/components/Logo";
-import { Loading } from "@/components/ui";
+import { AppReadyProvider } from "@/components/AppReady";
 
 const NAV = [
   { href: "/browse", label: "Browse" },
@@ -47,7 +47,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           })}
         </nav>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{ready ? children : <Loading />}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+        <AppReadyProvider value={ready}>{children}</AppReadyProvider>
+      </main>
     </div>
   );
 }
