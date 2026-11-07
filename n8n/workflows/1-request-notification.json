@@ -1,0 +1,287 @@
+{
+  "id": "lendloopReqNotif",
+  "name": "LendLoop: request notification",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request-event",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "loan-event-from-convex",
+      "name": "Loan event from Convex",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "6b0f7a52-3c1e-4c55-9d1a-6c656e646c01"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verifies the HMAC signature Convex puts on every webhook.\n// Signed string: `${X-LendLoop-Timestamp}.${raw body}`, key CONVEX_TO_N8N_SECRET.\n// Uses the raw bytes (not re-serialised JSON) and a constant-time compare.\nconst crypto = require('crypto');\nconst MAX_SKEW_SECONDS = 300;\n\nconst secret = $env.CONVEX_TO_N8N_SECRET;\nconst headers = $input.first().json.headers ?? {};\nconst timestamp = headers['x-lendloop-timestamp'];\nconst signature = headers['x-lendloop-signature'] ?? '';\n\nlet raw = '';\ntry {\n  raw = (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8');\n} catch (e) {\n  raw = '';\n}\n\nfunction check() {\n  if (!secret) return 'secret not configured';\n  if (!timestamp || !signature.startsWith('v1=')) return 'missing signature';\n  const age = Math.abs(Date.now() / 1000 - Number(timestamp));\n  if (!Number.isFinite(age) || age > MAX_SKEW_SECONDS) return 'stale timestamp';\n  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest();\n  const given = Buffer.from(signature.slice(3), 'hex');\n  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return 'signature mismatch';\n  return null;\n}\n\nconst problem = check();\nif (problem) {\n  console.log(`[lendloop] rejected webhook: ${problem}`);\n  return [{ json: { valid: false, reason: problem } }];\n}\nreturn [{ json: { valid: true, event: JSON.parse(raw) } }];\n"
+      },
+      "id": "verify-signature",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sig-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "signature-valid",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { received: true, eventId: $json.event.eventId } }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "accept-202",
+      "name": "Accept (202)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: 'invalid signature' } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "reject-401",
+      "name": "Reject (401)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the message from the minimum the webhook carries: first name, email,\n// tool name, dates. Throws (and so reaches the error workflow) when the\n// recipient cannot be notified.\nconst { event } = $('Verify signature').first().json;\nconst { eventId, type, loan, recipient } = event;\nif (!recipient?.email) {\n  throw new Error(`Recipient ${recipient?.userId ?? 'unknown'} has no email address; cannot notify about ${type} (${eventId})`);\n}\n\nconst dates = loan.startDate === loan.endDate ? loan.startDate : `${loan.startDate} to ${loan.endDate}`;\nconst copy = {\n  'loan.requested': ['New borrow request', `A neighbour would like to borrow your ${loan.toolName} (${dates}). Open LendLoop to approve or decline.`, 'Lender notified of a new request'],\n  'loan.cancelled': ['Request cancelled', `The request to borrow your ${loan.toolName} (${dates}) was cancelled.`, 'Lender notified of the cancellation'],\n  'loan.approved': ['Request approved', `Good news: your request for the ${loan.toolName} (${dates}) was approved. Please return it by ${loan.endDate}.`, 'Borrower notified of approval'],\n  'loan.declined': ['Request declined', `Your request for the ${loan.toolName} (${dates}) was declined this time.`, 'Borrower notified of the decline'],\n  'loan.returned': ['Thanks for returning it', `The ${loan.toolName} has been marked as returned. Thanks for keeping the loop going.`, 'Borrower notified of the return'],\n}[type];\nif (!copy) throw new Error(`Unknown event type ${type} (${eventId})`);\n\nconst [subject, text, summary] = copy;\nreturn [{ json: { eventId, loanId: loan.id, to: recipient.email, firstName: recipient.firstName, subject, text: `Hi ${recipient.firstName}, ${text}`, summary } }];\n"
+      },
+      "id": "compose-notification",
+      "name": "Compose notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mock delivery. A real provider call goes here (Resend, Postmark, SES...),\n// passing `idempotencyKey` as the provider's Idempotency-Key header so a\n// redelivered webhook cannot send the email twice.\nconst n = $input.first().json;\nconst masked = n.to.replace(/^(.).*(@.*)$/, '$1***$2');\nconst idempotencyKey = `notification:${n.eventId}`;\nconsole.log(`[lendloop] MOCK EMAIL to=${masked} subject=\"${n.subject}\" idempotency-key=${idempotencyKey}`);\nreturn [{ json: { ...n, channel: 'email (mock)', idempotencyKey, sentAt: new Date().toISOString() } }];\n"
+      },
+      "id": "send-notification-mock",
+      "name": "Send notification (mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Signs a write-back for LendLoop's Convex endpoints: HMAC-SHA256 over\n// `${timestamp}.${body}` with N8N_TO_CONVEX_SECRET (container env, never in this JSON).\nconst crypto = require('crypto');\nfunction signForConvex(payload) {\n  const secret = $env.N8N_TO_CONVEX_SECRET;\n  if (!secret) throw new Error('N8N_TO_CONVEX_SECRET is not set in the n8n container');\n  const body = JSON.stringify(payload);\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const digest = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');\n  return { body, timestamp, signature: `v1=${digest}` };\n}\n\nconst n = $input.first().json;\nreturn [{ json: signForConvex({\n  action: 'activity.record',\n  idempotencyKey: n.idempotencyKey,        // notification:<eventId>, so retries and replays dedupe\n  kind: 'notification_sent',\n  loanId: n.loanId,\n  summary: n.summary,\n  workflow: $workflow.name,\n  executionId: String($execution.id),\n}) }];\n"
+      },
+      "id": "sign-write-back",
+      "name": "Sign write-back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_SITE_URL }}/n8n/activity",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "record-in-lendloop",
+      "name": "Record in LendLoop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Loan event from Convex": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Accept (202)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject (401)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept (202)": {
+      "main": [
+        [
+          {
+            "node": "Compose notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose notification": {
+      "main": [
+        [
+          {
+            "node": "Send notification (mock)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send notification (mock)": {
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign write-back": {
+      "main": [
+        [
+          {
+            "node": "Record in LendLoop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "lendloopErrorWf1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,109 @@
+{
+  "id": "lendloopErrorWf1",
+  "name": "LendLoop: error handler",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "when-a-lendloop-workflow-fails",
+      "name": "When a LendLoop workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Signs a write-back for LendLoop's Convex endpoints: HMAC-SHA256 over\n// `${timestamp}.${body}` with N8N_TO_CONVEX_SECRET (container env, never in this JSON).\nconst crypto = require('crypto');\nfunction signForConvex(payload) {\n  const secret = $env.N8N_TO_CONVEX_SECRET;\n  if (!secret) throw new Error('N8N_TO_CONVEX_SECRET is not set in the n8n container');\n  const body = JSON.stringify(payload);\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const digest = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');\n  return { body, timestamp, signature: `v1=${digest}` };\n}\n\n// Runs whenever a LendLoop workflow fails after its node-level retries.\n// 1. Logs to the container output (docker compose logs n8n).\n// 2. Reports to Convex so the failure shows in LendLoop's admin view.\n// The execution id is the idempotency key: a retried report is not doubled.\nconst { execution = {}, workflow = {}, trigger } = $input.first().json;\nconst executionId = String(execution.id ?? trigger?.error?.timestamp ?? Date.now());\nconst node = execution.lastNodeExecuted ?? 'unknown node';\nconst message = (execution.error?.message ?? trigger?.error?.message ?? 'Unknown error').slice(0, 200);\nconst summary = `${workflow.name ?? 'Workflow'} failed at \"${node}\": ${message}`;\nconsole.log(`[lendloop] WORKFLOW FAILED execution=${executionId} ${summary} ${execution.url ?? ''}`);\nreturn [{ json: signForConvex({\n  action: 'activity.record',\n  idempotencyKey: `workflow_failed:${workflow.id ?? 'unknown'}:${executionId}`,\n  kind: 'workflow_failed',\n  summary,\n  workflow: workflow.name ?? 'unknown',\n  executionId,\n}) }];\n"
+      },
+      "id": "describe-and-sign-failure",
+      "name": "Describe and sign failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_SITE_URL }}/n8n/activity",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "report-to-lendloop",
+      "name": "Report to LendLoop",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "When a LendLoop workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Describe and sign failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe and sign failure": {
+      "main": [
+        [
+          {
+            "node": "Report to LendLoop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

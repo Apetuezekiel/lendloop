@@ -4,24 +4,37 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "convex": "convex dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed": "convex run seed:demo",
+    "n8n:up": "docker compose up -d",
+    "n8n:import": "sh scripts/n8n-import.sh",
+    "n8n:overdue": "sh scripts/n8n-run-overdue.sh"
   },
   "dependencies": {
+    "@clerk/nextjs": "7.9.25",
+    "convex": "1.49.0",
+    "convex-helpers": "0.1.134",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "convex-test": "0.0.67",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.1.0"
   },
   "packageManager": "pnpm@10.26.0"
 }

@@ -1,0 +1,37 @@
+# Self-hosted n8n for LendLoop's workflows.
+#   cp n8n/.env.example n8n/.env   (then fill in the secrets)
+#   docker compose up -d
+#   pnpm n8n:import                (imports and publishes the workflows)
+# Editor: http://localhost:5678
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.46.6
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678" # loopback only; Convex reaches it locally or via a tunnel
+    env_file: ./n8n/.env
+    environment:
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      TZ: ${TZ:-UTC}
+      # Code nodes cannot read n8n credentials, so the HMAC secrets reach them
+      # as container env vars (from n8n/.env, never from the workflow JSON).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      CODE_ENABLE_STDOUT: "true" # mock notifications show in `docker compose logs n8n`
+      N8N_RUNNERS_ALLOW_ENV: "*"
+      # Keep failed and successful runs so failures are inspectable.
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336" # hours, two weeks
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # lets n8n call a Convex backend on the host
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+
+volumes:
+  n8n_data:
